@@ -193,11 +193,10 @@
     </div>
 
     <script>
-        // 🔑 ЗАМЕНИТЕ НА ВАШ НОВЫЙ API КЛЮЧ
-        const API_KEY = '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';
+        // 🔑 НОВЫЙ API КЛЮЧ (создайте в OpenRouter)
+        const API_KEY = 'sk-or-v1-ваш_новый_ключ';
         
-        // Используем рабочий прокси
-        const PROXY_URL = 'https://api.allorigins.win/raw?url=';
+        // Прямой запрос к OpenRouter (без прокси)
         const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
         const chatContainer = document.getElementById('chat');
@@ -208,7 +207,6 @@
 
         let isLoading = false;
 
-        // Добавляем приветственное сообщение
         window.addEventListener('DOMContentLoaded', () => {
             appendMessage('assistant', '👋 Привет! Я Ox-Alpha. Задайте мне вопрос!');
         });
@@ -236,32 +234,35 @@
             isLoading = true;
             sendBtn.disabled = true;
             sendBtn.innerHTML = '<span class="loading-spinner"></span>';
-            tokenInfo.textContent = '⏳ Ожидание ответа...';
+            tokenInfo.textContent = '⏳ Отправка запроса...';
             errorMsg.style.display = 'none';
             errorMsg.textContent = '';
 
             appendMessage('user', text);
 
             try {
-                // Формируем историю сообщений
                 const messages = getConversationHistory();
                 
-                // Отправляем запрос через прокси
-                const response = await fetch(`${PROXY_URL}${encodeURIComponent(API_URL)}`, {
+                tokenInfo.textContent = '⏳ Ожидание ответа от модели...';
+
+                const response = await fetch(API_URL, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${API_KEY}`,
+                        'HTTP-Referer': window.location.href,
+                        'X-Title': 'Ox-Alpha Chat',
                     },
                     body: JSON.stringify({
                         model: 'stealth/ox-alpha',
                         messages: messages,
-                        stream: false, // Отключаем стриминг для простоты
+                        stream: false,
                     }),
                 });
 
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Ошибка ${response.status}: ${errorText}`);
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error?.message || `Ошибка ${response.status}`);
                 }
 
                 const data = await response.json();
@@ -269,16 +270,28 @@
                 if (data.choices && data.choices[0] && data.choices[0].message) {
                     const content = data.choices[0].message.content;
                     appendMessage('assistant', content);
-                    tokenInfo.textContent = '✅ Ответ получен';
+                    
+                    // Показываем информацию о токенах
+                    const tokens = data.usage?.total_tokens || 0;
+                    tokenInfo.textContent = `✅ Ответ получен | Токенов: ${tokens}`;
                 } else {
-                    throw new Error('Неверный формат ответа');
+                    throw new Error('Неверный формат ответа от API');
                 }
 
             } catch (error) {
                 console.error('❌ Ошибка:', error);
                 errorMsg.style.display = 'block';
-                errorMsg.textContent = `❌ Ошибка: ${error.message}`;
-                tokenInfo.textContent = '❌ Ошибка соединения';
+                
+                // Улучшенное сообщение об ошибке
+                let errorText = `❌ Ошибка: ${error.message}`;
+                if (error.message.includes('Failed to fetch')) {
+                    errorText += '\n\n💡 Решение: Откройте https://cors-anywhere.herokuapp.com/ и нажмите "Request temporary access"';
+                }
+                if (error.message.includes('401')) {
+                    errorText += '\n\n💡 Неверный API ключ. Создайте новый в OpenRouter';
+                }
+                errorMsg.textContent = errorText;
+                tokenInfo.textContent = '❌ Ошибка';
             } finally {
                 isLoading = false;
                 sendBtn.disabled = false;
@@ -312,7 +325,6 @@
             allMessages.forEach(msg => {
                 const role = msg.classList.contains('user') ? 'user' : 'assistant';
                 const content = msg.querySelector('.content')?.textContent || '';
-                // Пропускаем приветственное сообщение для истории
                 if (content && !content.startsWith('👋')) {
                     messages.push({ role, content });
                 }
@@ -329,7 +341,6 @@
 
         console.log('🚀 Чат запущен!');
         console.log('🔑 API Key:', API_KEY ? '✅ Установлен' : '❌ Не установлен');
-        console.log('🌐 Прокси:', PROXY_URL);
     </script>
 </body>
 </html>
