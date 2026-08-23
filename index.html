@@ -158,6 +158,16 @@
             display: none;
             white-space: pre-wrap;
         }
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @media (max-width: 600px) {
             .chat { height: 300px; padding: 16px; }
             .input-area { padding: 12px 16px 16px; flex-direction: column; }
@@ -183,11 +193,11 @@
     </div>
 
     <script>
-        // ⚠️ ВАЖНО: ЗАМЕНИТЕ НА ВАШ API КЛЮЧ
+        // 🔑 ЗАМЕНИТЕ НА ВАШ НОВЫЙ API КЛЮЧ
         const API_KEY = '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';
         
-        // Используем прокси для обхода CORS
-        const PROXY_URL = 'https://cors-anywhere.herokuapp.com/';
+        // Используем рабочий прокси
+        const PROXY_URL = 'https://api.allorigins.win/raw?url=';
         const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
         const chatContainer = document.getElementById('chat');
@@ -197,6 +207,11 @@
         const errorMsg = document.getElementById('errorMsg');
 
         let isLoading = false;
+
+        // Добавляем приветственное сообщение
+        window.addEventListener('DOMContentLoaded', () => {
+            appendMessage('assistant', '👋 Привет! Я Ox-Alpha. Задайте мне вопрос!');
+        });
 
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -220,7 +235,7 @@
             userInput.style.height = 'auto';
             isLoading = true;
             sendBtn.disabled = true;
-            sendBtn.textContent = '⏳...';
+            sendBtn.innerHTML = '<span class="loading-spinner"></span>';
             tokenInfo.textContent = '⏳ Ожидание ответа...';
             errorMsg.style.display = 'none';
             errorMsg.textContent = '';
@@ -228,93 +243,42 @@
             appendMessage('user', text);
 
             try {
-                const response = await fetch(`${PROXY_URL}${API_URL}`, {
+                // Формируем историю сообщений
+                const messages = getConversationHistory();
+                
+                // Отправляем запрос через прокси
+                const response = await fetch(`${PROXY_URL}${encodeURIComponent(API_URL)}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${API_KEY}`,
                     },
                     body: JSON.stringify({
                         model: 'stealth/ox-alpha',
-                        messages: getConversationHistory(),
-                        stream: true,
+                        messages: messages,
+                        stream: false, // Отключаем стриминг для простоты
                     }),
                 });
 
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error?.message || `Ошибка ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(`Ошибка ${response.status}: ${errorText}`);
                 }
 
-                const assistantDiv = document.createElement('div');
-                assistantDiv.className = 'message assistant';
-                const label = document.createElement('div');
-                label.className = 'label';
-                label.textContent = 'Ox-Alpha';
-                assistantDiv.appendChild(label);
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'content';
-                contentDiv.textContent = '';
-                assistantDiv.appendChild(contentDiv);
-                chatContainer.appendChild(assistantDiv);
-                scrollToBottom();
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let fullContent = '';
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        const trimmed = line.trim();
-                        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-
-                        const data = trimmed.slice(6);
-                        if (data === '[DONE]') continue;
-
-                        try {
-                            const json = JSON.parse(data);
-                            const delta = json.choices?.[0]?.delta;
-                            
-                            if (delta?.content) {
-                                fullContent += delta.content;
-                                contentDiv.textContent = fullContent;
-                                scrollToBottom();
-                            }
-
-                            if (json.usage?.completion_tokens_details?.reasoning_tokens) {
-                                tokenInfo.textContent = `🧠 Reasoning: ${json.usage.completion_tokens_details.reasoning_tokens} токенов`;
-                            }
-                        } catch (e) {
-                            console.warn('⚠️ Ошибка парсинга:', e);
-                        }
-                    }
-                }
-
-                if (fullContent) {
+                const data = await response.json();
+                
+                if (data.choices && data.choices[0] && data.choices[0].message) {
+                    const content = data.choices[0].message.content;
+                    appendMessage('assistant', content);
                     tokenInfo.textContent = '✅ Ответ получен';
                 } else {
-                    contentDiv.textContent = '⚠️ Пустой ответ';
-                    tokenInfo.textContent = '⚠️ Модель вернула пустой ответ';
+                    throw new Error('Неверный формат ответа');
                 }
 
             } catch (error) {
                 console.error('❌ Ошибка:', error);
                 errorMsg.style.display = 'block';
-                errorMsg.textContent = `❌ Ошибка: ${error.message}\n\n💡 Решение: Откройте https://cors-anywhere.herokuapp.com/ и нажмите "Request temporary access"`;
+                errorMsg.textContent = `❌ Ошибка: ${error.message}`;
                 tokenInfo.textContent = '❌ Ошибка соединения';
-                
-                const lastMsg = chatContainer.lastElementChild;
-                if (lastMsg && lastMsg.classList.contains('assistant')) {
-                    lastMsg.remove();
-                }
             } finally {
                 isLoading = false;
                 sendBtn.disabled = false;
@@ -326,14 +290,17 @@
         function appendMessage(role, content) {
             const div = document.createElement('div');
             div.className = `message ${role}`;
+            
             const label = document.createElement('div');
             label.className = 'label';
             label.textContent = role === 'user' ? 'Вы' : 'Ox-Alpha';
             div.appendChild(label);
+            
             const contentDiv = document.createElement('div');
             contentDiv.className = 'content';
             contentDiv.textContent = content;
             div.appendChild(contentDiv);
+            
             chatContainer.appendChild(div);
             scrollToBottom();
         }
@@ -341,13 +308,16 @@
         function getConversationHistory() {
             const messages = [];
             const allMessages = chatContainer.querySelectorAll('.message');
+            
             allMessages.forEach(msg => {
                 const role = msg.classList.contains('user') ? 'user' : 'assistant';
                 const content = msg.querySelector('.content')?.textContent || '';
-                if (content && content !== ' ' && !content.startsWith('⚠️') && !content.startsWith('❌')) {
+                // Пропускаем приветственное сообщение для истории
+                if (content && !content.startsWith('👋')) {
                     messages.push({ role, content });
                 }
             });
+            
             return messages;
         }
 
@@ -359,6 +329,7 @@
 
         console.log('🚀 Чат запущен!');
         console.log('🔑 API Key:', API_KEY ? '✅ Установлен' : '❌ Не установлен');
+        console.log('🌐 Прокси:', PROXY_URL);
     </script>
 </body>
 </html>
