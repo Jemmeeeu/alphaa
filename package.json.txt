@@ -1,7 +1,7 @@
-﻿{
+{
   "name": "ox-alpha-proxy",
   "version": "1.0.0",
-  "description": "Прокси для Ox-Alpha чата",
+  "description": "Прокси-сервер для Ox-Alpha чата",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
